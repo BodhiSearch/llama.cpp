@@ -530,8 +530,14 @@ static json oaicompat_completion_params_parse(
     const std::string & chat_template) {
     json llama_params;
 
+    std::string prompt = json_value(body, "prompt", std::string(""));
+    if (prompt != "") {
+        LOG_WRN("Using prompt from body '%s'", prompt.c_str());
+        llama_params["prompt"] = prompt;
+    } else {
     // Apply chat template to the list of messages
     llama_params["prompt"] = format_chat(model, chat_template, body.at("messages"));
+    }
 
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {
