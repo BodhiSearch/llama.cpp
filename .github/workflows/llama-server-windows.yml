@@ -1,0 +1,150 @@
+# Server Windows build with CPU optimizations
+name: Llama Server Windows
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a release'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  LLAMA_LOG_COLORS: 1
+  LLAMA_LOG_PREFIX: 1
+  LLAMA_LOG_TIMESTAMPS: 1
+  LLAMA_LOG_VERBOSITY: 10
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2019
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - build: 'generic'
+            defines: '-DGGML_NATIVE=OFF -DGGML_AVX=OFF -DGGML_AVX2=OFF -DGGML_FMA=OFF'
+          - build: 'haswell'
+            defines: '-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_F16C=ON -DGGML_AVX2=ON -DGGML_FMA=ON'
+
+    steps:
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build
+        id: cmake_build
+        run: |
+          cmake -B build -DLLAMA_CURL=OFF ${{ matrix.defines }} -DLLAMA_BUILD_SERVER=ON
+          cmake --build build --config Release -j ${env:NUMBER_OF_PROCESSORS} --target llama-server
+          
+      # - name: Python setup
+      #   id: setup_python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: '3.11'
+
+      # - name: Tests dependencies
+      #   id: test_dependencies
+      #   run: |
+      #     pip install -r examples/server/tests/requirements.txt
+
+      # - name: Set environment variables
+      #   shell: pwsh
+      #   run: |
+      #     echo "USER_HOME=${HOME}" >> $env:GITHUB_ENV
+
+      # - name: Cache HuggingFace models
+      #   uses: actions/cache@v4
+      #   id: cache-hf
+      #   with:
+      #     path: ${{ env.USER_HOME }}\.cache\huggingface
+      #     key: hf-cache-Windows-llama2-7b-chat-${{ matrix.build }}
+
+      # - name: Check and Download Llama model
+      #   if: steps.cache-hf.outputs.cache-hit != 'true'
+      #   run: |
+      #     python -m pip install -U pip
+      #     python -m pip install -U "huggingface_hub[cli]"
+      #     huggingface-cli download --revision 191239b3e26b2882fb562ffccdd1cf0f65402adb TheBloke/Llama-2-7B-Chat-GGUF llama-2-7b-chat.Q4_K_M.gguf
+
+      # - name: Tests
+      #   id: server_integration_tests
+      #   run: |
+      #     cd examples/server/tests
+      #     $env:PYTHONIOENCODING = ":replace"
+      #     pytest -v -x
+
+      # - name: Slow tests
+      #   id: server_integration_tests_slow
+      #   if: ${{ github.event.schedule || github.event.inputs.slow_tests == 'true' }}
+      #   run: |
+      #     cd examples/server/tests
+      #     $env:SLOW_TESTS = "1"
+      #     pytest -v -x 
+      
+      # Keep the artifact upload for workflow runs
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-server-windows-${{ matrix.build }}
+          path: build/bin/Release/llama-server.exe
+          compression-level: 0
+
+  release:
+    runs-on: ubuntu-latest
+    needs: windows
+    if: always() && github.event.inputs.create_release == 'true'
+    steps:
+      - name: Clone
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Get the short SHA for tagging the release
+      - name: Get short SHA
+        id: get_short_sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      # Create a directory for artifacts
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+      # Download all artifacts from previous jobs
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      # List contents for debugging
+      - name: List artifacts
+        run: find artifacts -type f | sort
+      # Check if any artifacts were found
+      - name: Check for artifacts
+        id: check_artifacts
+        run: |
+          ARTIFACT_COUNT=$(find artifacts -type f | wc -l)
+          echo "artifact_count=$ARTIFACT_COUNT" >> $GITHUB_OUTPUT
+          if [ "$ARTIFACT_COUNT" -eq 0 ]; then
+            echo "No artifacts found! All builds must have failed."
+            exit 1
+          else
+            echo "Found $ARTIFACT_COUNT artifacts, proceeding with release creation."
+          fi
+      # Create a release with all artifacts
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Llama Server Windows build ${{ steps.get_short_sha.outputs.sha }}
+          tag_name: build-${{ steps.get_short_sha.outputs.sha }}
+          draft: false
+          prerelease: true
+          files: artifacts/**/*
+          fail_on_unmatched_files: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
