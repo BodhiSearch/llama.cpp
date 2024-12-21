@@ -333,6 +333,29 @@ class ServerPreset:
         server.server_reranking = True
         return server
 
+    @staticmethod
+    def llama2() -> ServerProcess:
+        server = ServerProcess()
+        server.model_file = os.path.join(
+            os.path.expanduser("~"),
+            ".cache",
+            "huggingface",
+            "hub",
+            "models--TheBloke--Llama-2-7B-Chat-GGUF",
+            "snapshots",
+            "191239b3e26b2882fb562ffccdd1cf0f65402adb",
+            "llama-2-7b-chat.Q4_K_M.gguf",
+        )
+        server.debug = True
+        server.model_hf_repo = None
+        server.model_hf_file = None
+        server.model_alias = "llama2"
+        server.n_ctx = 2048
+        server.n_batch = 32
+        server.n_slots = 2
+        server.n_predict = 2048
+        server.seed = 42
+        return server
 
 def parallel_function_calls(function_list: List[Tuple[Callable[..., Any], Tuple[Any, ...]]]) -> List[Any]:
     """
