@@ -3763,7 +3763,10 @@ int main(int argc, char ** argv) {
         std::vector<server_task> tasks;
 
         try {
-            std::vector<llama_tokens> tokenized_prompts = tokenize_input_prompts(ctx_server.vocab, data.at("prompt"), true, true);
+            const bool add_special = json_value(data, "add_special", true);
+            const bool with_pieces = json_value(data, "with_pieces", true);
+
+            std::vector<llama_tokens> tokenized_prompts = tokenize_input_prompts(ctx_server.vocab, data.at("prompt"), add_special, with_pieces);
             tasks.reserve(tokenized_prompts.size());
             for (size_t i = 0; i < tokenized_prompts.size(); i++) {
                 server_task task = server_task(type);

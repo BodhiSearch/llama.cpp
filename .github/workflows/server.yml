@@ -71,6 +71,26 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: envs
+        shell: bash
+        run: |
+          echo "USER_HOME=$HOME" >> $GITHUB_ENV
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        id: cache-hf
+        with:
+          path: ${{ env.USER_HOME }}/.cache/huggingface
+          key: hf-cache-llama2-7b-chat
+          enableCrossOsArchive: true
+
+      - name: Check and Download Llama model
+        if: steps.cache-hf.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install -U pip
+          python -m pip install -U "huggingface_hub[cli]"
+          huggingface-cli download --revision 191239b3e26b2882fb562ffccdd1cf0f65402adb TheBloke/Llama-2-7B-Chat-GGUF llama-2-7b-chat.Q4_K_M.gguf
+
       - name: Tests dependencies
         id: test_dependencies
         run: |
@@ -198,6 +218,25 @@ jobs:
         id: prepare_libcurl
         run: |
           cp $env:RUNNER_TEMP/libcurl/bin/libcurl-x64.dll ./build/bin/Release/libcurl-x64.dll
+
+      - name: Set environment variables
+        shell: pwsh
+        run: |
+          echo "USER_HOME=${HOME}" >> $env:GITHUB_ENV
+
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        id: cache-hf
+        with:
+          path: ${{ env.USER_HOME }}\.cache\huggingface
+          key: hf-cache-Windows-llama2-7b-chat
+
+      - name: Check and Download Llama model
+        if: steps.cache-hf.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install -U pip
+          python -m pip install -U "huggingface_hub[cli]"
+          huggingface-cli download --revision 191239b3e26b2882fb562ffccdd1cf0f65402adb TheBloke/Llama-2-7B-Chat-GGUF llama-2-7b-chat.Q4_K_M.gguf
 
       - name: Tests
         id: server_integration_tests
