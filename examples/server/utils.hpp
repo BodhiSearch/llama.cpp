@@ -617,11 +617,17 @@ static json oaicompat_completion_params_parse(
         }
     }
 
+    std::string prompt = json_value(body, "prompt", std::string(""));
+    if (prompt != "") {
+        LOG_WRN("Using prompt from body");
+        llama_params["prompt"] = prompt;
+    } else {
     // Apply chat template to the list of messages
     if (use_jinja) {
         llama_params["prompt"] = tmpl.apply(body.at("messages"), tools, /* add_generation_prompt= */ true);
     } else {
         llama_params["prompt"] = format_chat(tmpl, body.at("messages"));
+    }
     }
 
     // Handle "n" field
