@@ -119,15 +119,11 @@ jobs:
             -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
           cmake --build build --target llama-server
 
-      - name: Zip the bin folder
-        run: |
-          zip -r llama-server.zip build/bin
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: llama-server--x86_64-unknown-linux-gnu--cuda-12.6
-          path: llama-server.zip
+          path: build/bin/*
 
   ubuntu-vulkan:
     runs-on: ubuntu-22.04
@@ -358,25 +354,17 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release ^
             -DLLAMA_FATAL_WARNINGS=OFF ^
             -DLLAMA_CURL=OFF ^
-            -DBUILD_SHARED_LIBS=OFF ^
+            -DBUILD_SHARED_LIBS=ON ^
             -DGGML_NATIVE=OFF ^
             -DGGML_CUDA=ON ^
             -DCMAKE_CUDA_RUNTIME_LIBRARY=Shared
           cmake --build build --config Release --target llama-server
 
-      - name: Install zip
-        run: |
-          choco install zip -y
-
-      - name: Zip the bin folder
-        run: |
-          zip -r llama-server.zip build/bin
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: llama-server--x86_64-pc-windows-msvc--cuda-${{ matrix.cuda }}
-          path: llama-server.zip
+          path: build/bin/Release/*
 
   windows-cpu:
     runs-on: windows-latest
