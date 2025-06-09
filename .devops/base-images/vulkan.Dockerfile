@@ -1,0 +1,114 @@
+ARG UBUNTU_VERSION=24.04
+
+FROM ubuntu:$UBUNTU_VERSION AS build
+
+# BodhiApp: Version metadata build arguments
+ARG BUILD_VERSION
+ARG BUILD_COMMIT
+ARG BUILD_TIMESTAMP
+ARG BUILD_BRANCH
+ARG VULKAN_SDK_VERSION=1.4.321.1
+
+# Install build tools
+RUN apt update && apt install -y git build-essential cmake wget xz-utils
+
+# Install Vulkan SDK
+# Note: Currently only x86_64 is supported. ARM64 has Vulkan SDK extraction issues.
+# This matches upstream behavior - see https://github.com/ggml-org/llama.cpp/issues/11888
+RUN ARCH=$(uname -m) && \
+    wget -qO /tmp/vulkan-sdk.tar.xz https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkan-sdk-linux-${ARCH}-${VULKAN_SDK_VERSION}.tar.xz && \
+    mkdir -p /opt/vulkan && \
+    tar -xf /tmp/vulkan-sdk.tar.xz -C /tmp --strip-components=1 && \
+    mv /tmp/${ARCH}/* /opt/vulkan/ && \
+    rm -rf /tmp/*
+
+# Install cURL and Vulkan SDK dependencies
+RUN apt install -y libcurl4-openssl-dev curl \
+    libxcb-xinput0 libxcb-xinerama0 libxcb-cursor-dev
+
+# Set environment variables
+ENV VULKAN_SDK=/opt/vulkan
+ENV PATH=$VULKAN_SDK/bin:$PATH
+ENV LD_LIBRARY_PATH=$VULKAN_SDK/lib:$LD_LIBRARY_PATH
+ENV CMAKE_PREFIX_PATH=$VULKAN_SDK:$CMAKE_PREFIX_PATH
+ENV PKG_CONFIG_PATH=$VULKAN_SDK/lib/pkgconfig:$PKG_CONFIG_PATH
+
+# Build it
+WORKDIR /app
+
+COPY . .
+
+RUN cmake -B build -DGGML_NATIVE=OFF -DGGML_VULKAN=1 -DLLAMA_BUILD_TESTS=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,\$ORIGIN" && \
+    cmake --build build --config Release -j$(nproc)
+
+RUN mkdir -p /app/lib && \
+    find build -name "*.so" -exec cp {} /app/lib \;
+
+# BodhiApp: Create BodhiApp-compatible folder structure (x86_64 only)
+RUN mkdir -p /app/bin/x86_64-unknown-linux-gnu/vulkan && \
+    cp build/bin/llama-server /app/bin/x86_64-unknown-linux-gnu/vulkan/ && \
+    cp /app/lib/*.so /app/bin/x86_64-unknown-linux-gnu/vulkan/ 2>/dev/null || true
+
+## Base image
+FROM ubuntu:$UBUNTU_VERSION AS base
+
+RUN apt-get update \
+    && apt-get install -y libgomp1 curl libvulkan-dev \
+    && apt autoremove -y \
+    && apt clean -y \
+    && rm -rf /tmp/* /var/tmp/* \
+    && find /var/cache/apt/archives /var/lib/apt/lists -not -name lock -type f -delete \
+    && find /var/cache -type f -delete
+
+# BodhiApp: Copy BodhiApp-compatible folder structure instead of lib/
+COPY --from=build /app/bin/ /app/bin/
+
+### Server, Server only
+FROM base AS server
+
+# BodhiApp: Version metadata arguments
+ARG BUILD_VERSION
+ARG BUILD_COMMIT
+ARG BUILD_TIMESTAMP
+ARG BUILD_BRANCH
+ARG VULKAN_SDK_VERSION
+
+ENV LLAMA_ARG_HOST=0.0.0.0
+
+WORKDIR /app
+
+# BodhiApp: Create non-root user for security
+RUN groupadd -r llama && useradd -r -g llama -d /app -s /bin/bash llama && \
+    chown -R llama:llama /app
+
+# BodhiApp: Set up Vulkan environment
+ENV VK_INSTANCE_LAYERS=""
+ENV VK_DEVICE_SELECT_FORCE_DEFAULT_DEVICE=1
+
+# BodhiApp: Embed version information in image
+LABEL org.opencontainers.image.version="${BUILD_VERSION}"
+LABEL org.opencontainers.image.revision="${BUILD_COMMIT}"
+LABEL org.opencontainers.image.created="${BUILD_TIMESTAMP}"
+LABEL bodhi.build.timestamp="${BUILD_TIMESTAMP}"
+LABEL bodhi.build.branch="${BUILD_BRANCH}"
+LABEL bodhi.variant="vulkan"
+LABEL bodhi.vulkan.version="${VULKAN_SDK_VERSION}"
+LABEL bodhi.platform.compatibility="x86_64"
+LABEL bodhi.requires.gpu="vulkan-compatible"
+
+# BodhiApp: Create version file for runtime access
+RUN echo "{\"version\":\"${BUILD_VERSION}\",\"commit\":\"${BUILD_COMMIT}\",\"timestamp\":\"${BUILD_TIMESTAMP}\",\"variant\":\"vulkan\",\"branch\":\"${BUILD_BRANCH}\",\"vulkan_version\":\"${VULKAN_SDK_VERSION}\"}" > /app/version.json && \
+    chown llama:llama /app/version.json
+
+# BodhiApp: Use non-root user
+USER llama
+
+# BodhiApp: Health check - verify Vulkan availability and binary (x86_64 only)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD test -x /app/bin/x86_64-unknown-linux-gnu/vulkan/llama-server && \
+        vulkaninfo > /dev/null 2>&1 || exit 1
+
+# BodhiApp: Metadata labels
+LABEL org.opencontainers.image.title="BodhiApp llama.cpp Vulkan Runtime"
+LABEL org.opencontainers.image.description="Vulkan-enabled llama-server binary for BodhiApp integration"
+LABEL org.opencontainers.image.source="https://github.com/BodhiSearch/llama.cpp"
