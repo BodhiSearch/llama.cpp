@@ -1,0 +1,101 @@
+name: 'Create Build Info'
+description: 'Creates and uploads build info artifact for a variant'
+
+inputs:
+  variant:
+    description: 'Variant name (e.g., cpu, cuda, rocm)'
+    required: true
+  platforms:
+    description: 'Comma-separated platforms (e.g., linux/amd64,linux/arm64)'
+    required: true
+  description:
+    description: 'Human-readable variant description'
+    required: true
+  dockerfile:
+    description: 'Path to Dockerfile'
+    required: true
+  build-status:
+    description: 'Build step outcome (from steps.build.outcome)'
+    required: true
+  build-digest:
+    description: 'Docker image digest (from steps.build.outputs.digest)'
+    required: false
+    default: ''
+  registry:
+    description: 'Docker registry URL'
+    required: true
+  version:
+    description: 'Release version'
+    required: true
+  commit-sha:
+    description: 'Git commit SHA'
+    required: true
+  timestamp:
+    description: 'Build timestamp'
+    required: true
+  branch:
+    description: 'Git branch/ref name'
+    required: true
+  extra-build-args:
+    description: 'Extra build args as JSON (optional, e.g., {"VULKAN_SDK_VERSION":"1.4.321.1"})'
+    required: false
+    default: '{}'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create build info artifact
+      if: always()
+      shell: bash
+      run: |
+        # Create base info
+        jq -n \
+          --arg variant "${{ inputs.variant }}" \
+          --arg status "${{ inputs.build-status }}" \
+          --arg platforms "${{ inputs.platforms }}" \
+          --arg dockerfile "${{ inputs.dockerfile }}" \
+          --arg description "${{ inputs.description }}" \
+          '{
+            variant: $variant,
+            status: $status,
+            platforms: ($platforms | split(",")),
+            dockerfile: $dockerfile,
+            description: $description
+          }' > build-info-${{ inputs.variant }}.json
+
+        # Add success-specific info if build succeeded
+        if [ "${{ inputs.build-status }}" = "success" ]; then
+          jq \
+            --arg registry "${{ inputs.registry }}" \
+            --arg version "${{ inputs.version }}" \
+            --arg digest "${{ inputs.build-digest }}" \
+            --arg commit_sha "${{ inputs.commit-sha }}" \
+            --arg timestamp "${{ inputs.timestamp }}" \
+            --arg branch "${{ inputs.branch }}" \
+            --argjson extra '${{ inputs.extra-build-args }}' \
+            '. + {
+              tags: [
+                "\($registry):\(.variant)-\($version)",
+                "\($registry):latest-\(.variant)"
+              ],
+              digest: $digest,
+              build_args: ({
+                BUILD_VERSION: $version,
+                BUILD_COMMIT: $commit_sha,
+                BUILD_TIMESTAMP: $timestamp,
+                BUILD_BRANCH: $branch
+              } + $extra)
+            }' build-info-${{ inputs.variant }}.json > tmp.json
+          mv tmp.json build-info-${{ inputs.variant }}.json
+        fi
+
+        echo "Build info for ${{ inputs.variant }}:"
+        cat build-info-${{ inputs.variant }}.json | jq .
+
+    - name: Upload build info artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-info-${{ inputs.variant }}
+        path: build-info-${{ inputs.variant }}.json
+        retention-days: 90
