@@ -1,0 +1,673 @@
+name: Base Images
+
+on:
+  push:
+    tags:
+      - 'base-images/v*'  # Only triggered by version tags like base-images/v2508201420-abc1234
+
+# Prevent concurrent releases
+concurrency:
+  group: base-images-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io/bodhisearch/llama.cpp
+
+jobs:
+  # Extract version information from tag (similar to BodhiApp pattern)
+  extract-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit_hash: ${{ steps.version.outputs.commit_hash }}
+      timestamp: ${{ steps.version.outputs.timestamp }}
+      readable_date: ${{ steps.version.outputs.readable_date }}
+    steps:
+      - name: Extract version information from tag
+        id: version
+        run: |
+          # Extract version from tag (base-images/v202509231420-abc1234 -> 202509231420-abc1234)
+          if [[ $GITHUB_REF == refs/tags/base-images/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/base-images/v}
+            TIMESTAMP=$(echo "$VERSION" | cut -d'-' -f1)
+            COMMIT_HASH=$(echo "$VERSION" | cut -d'-' -f2)
+          else
+            echo "Error: Unsupported tag format: $GITHUB_REF"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION (Timestamp: $TIMESTAMP, Commit: $COMMIT_HASH)"
+
+  # Build CPU variant (supports multi-platform)
+  build-cpu:
+    needs: extract-version
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push CPU image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devops/base-images/cpu.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}:cpu-${{ needs.extract-version.outputs.version }}
+            ${{ env.REGISTRY }}:latest-cpu
+          build-args: |
+            BUILD_VERSION=${{ needs.extract-version.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ needs.extract-version.outputs.timestamp }}
+            BUILD_BRANCH=${{ github.ref_name }}
+          cache-from: type=gha,scope=cpu
+          cache-to: type=gha,mode=max,scope=cpu
+
+      - name: Create and upload build info
+        uses: ./.github/actions/create-build-info
+        with:
+          variant: cpu
+          platforms: linux/amd64,linux/arm64
+          description: Multi-platform CPU runtime
+          dockerfile: .devops/base-images/cpu.Dockerfile
+          build-status: ${{ steps.build.outcome }}
+          build-digest: ${{ steps.build.outputs.digest }}
+          registry: ${{ env.REGISTRY }}
+          version: ${{ needs.extract-version.outputs.version }}
+          commit-sha: ${{ github.sha }}
+          timestamp: ${{ needs.extract-version.outputs.timestamp }}
+          branch: ${{ github.ref_name }}
+
+  # Build CUDA variant (x86_64 only)
+  build-cuda:
+    needs: extract-version
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push CUDA image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devops/base-images/cuda.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}:cuda-${{ needs.extract-version.outputs.version }}
+            ${{ env.REGISTRY }}:latest-cuda
+          build-args: |
+            BUILD_VERSION=${{ needs.extract-version.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ needs.extract-version.outputs.timestamp }}
+            BUILD_BRANCH=${{ github.ref_name }}
+          cache-from: type=gha,scope=cuda
+          cache-to: type=gha,mode=max,scope=cuda
+
+      - name: Create and upload build info
+        uses: ./.github/actions/create-build-info
+        with:
+          variant: cuda
+          platforms: linux/amd64
+          description: NVIDIA GPU acceleration with CUDA 12.4+
+          dockerfile: .devops/base-images/cuda.Dockerfile
+          build-status: ${{ steps.build.outcome }}
+          build-digest: ${{ steps.build.outputs.digest }}
+          registry: ${{ env.REGISTRY }}
+          version: ${{ needs.extract-version.outputs.version }}
+          commit-sha: ${{ github.sha }}
+          timestamp: ${{ needs.extract-version.outputs.timestamp }}
+          branch: ${{ github.ref_name }}
+
+  # Build ROCm variant (x86_64 only)
+  build-rocm:
+    needs: extract-version
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ROCm image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devops/base-images/rocm.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}:rocm-${{ needs.extract-version.outputs.version }}
+            ${{ env.REGISTRY }}:latest-rocm
+          build-args: |
+            BUILD_VERSION=${{ needs.extract-version.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ needs.extract-version.outputs.timestamp }}
+            BUILD_BRANCH=${{ github.ref_name }}
+          cache-from: type=gha,scope=rocm
+          cache-to: type=gha,mode=max,scope=rocm
+
+      - name: Create and upload build info
+        uses: ./.github/actions/create-build-info
+        with:
+          variant: rocm
+          platforms: linux/amd64
+          description: AMD GPU acceleration with ROCm 6.1+
+          dockerfile: .devops/base-images/rocm.Dockerfile
+          build-status: ${{ steps.build.outcome }}
+          build-digest: ${{ steps.build.outputs.digest }}
+          registry: ${{ env.REGISTRY }}
+          version: ${{ needs.extract-version.outputs.version }}
+          commit-sha: ${{ github.sha }}
+          timestamp: ${{ needs.extract-version.outputs.timestamp }}
+          branch: ${{ github.ref_name }}
+
+  # Build Vulkan variant (x86_64 only)
+  # Note: ARM64 builds disabled to match upstream - Vulkan SDK has extraction issues on ARM64
+  build-vulkan:
+    needs: extract-version
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Vulkan image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devops/base-images/vulkan.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}:vulkan-${{ needs.extract-version.outputs.version }}
+            ${{ env.REGISTRY }}:latest-vulkan
+          build-args: |
+            BUILD_VERSION=${{ needs.extract-version.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ needs.extract-version.outputs.timestamp }}
+            BUILD_BRANCH=${{ github.ref_name }}
+            VULKAN_SDK_VERSION=1.4.321.1
+          cache-from: type=gha,scope=vulkan
+          cache-to: type=gha,mode=max,scope=vulkan
+
+      - name: Create and upload build info
+        uses: ./.github/actions/create-build-info
+        with:
+          variant: vulkan
+          platforms: linux/amd64
+          description: Cross-vendor GPU acceleration (x86_64 only)
+          dockerfile: .devops/base-images/vulkan.Dockerfile
+          build-status: ${{ steps.build.outcome }}
+          build-digest: ${{ steps.build.outputs.digest }}
+          registry: ${{ env.REGISTRY }}
+          version: ${{ needs.extract-version.outputs.version }}
+          commit-sha: ${{ github.sha }}
+          timestamp: ${{ needs.extract-version.outputs.timestamp }}
+          branch: ${{ github.ref_name }}
+          extra-build-args: '{"VULKAN_SDK_VERSION":"1.4.321.1"}'
+
+  # Build MUSA variant (Moore Threads GPU, x86_64 only)
+  build-musa:
+    needs: extract-version
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push MUSA image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devops/base-images/musa.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}:musa-${{ needs.extract-version.outputs.version }}
+            ${{ env.REGISTRY }}:latest-musa
+          build-args: |
+            BUILD_VERSION=${{ needs.extract-version.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ needs.extract-version.outputs.timestamp }}
+            BUILD_BRANCH=${{ github.ref_name }}
+          cache-from: type=gha,scope=musa
+          cache-to: type=gha,mode=max,scope=musa
+
+      - name: Create and upload build info
+        uses: ./.github/actions/create-build-info
+        with:
+          variant: musa
+          platforms: linux/amd64
+          description: Moore Threads GPU acceleration
+          dockerfile: .devops/base-images/musa.Dockerfile
+          build-status: ${{ steps.build.outcome }}
+          build-digest: ${{ steps.build.outputs.digest }}
+          registry: ${{ env.REGISTRY }}
+          version: ${{ needs.extract-version.outputs.version }}
+          commit-sha: ${{ github.sha }}
+          timestamp: ${{ needs.extract-version.outputs.timestamp }}
+          branch: ${{ github.ref_name }}
+
+  # Build Intel variant (Intel GPU with SYCL, x86_64 only)
+  build-intel:
+    needs: extract-version
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Intel image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devops/base-images/intel.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}:intel-${{ needs.extract-version.outputs.version }}
+            ${{ env.REGISTRY }}:latest-intel
+          build-args: |
+            BUILD_VERSION=${{ needs.extract-version.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ needs.extract-version.outputs.timestamp }}
+            BUILD_BRANCH=${{ github.ref_name }}
+          cache-from: type=gha,scope=intel
+          cache-to: type=gha,mode=max,scope=intel
+
+      - name: Create and upload build info
+        uses: ./.github/actions/create-build-info
+        with:
+          variant: intel
+          platforms: linux/amd64
+          description: Intel GPU with SYCL support
+          dockerfile: .devops/base-images/intel.Dockerfile
+          build-status: ${{ steps.build.outcome }}
+          build-digest: ${{ steps.build.outputs.digest }}
+          registry: ${{ env.REGISTRY }}
+          version: ${{ needs.extract-version.outputs.version }}
+          commit-sha: ${{ github.sha }}
+          timestamp: ${{ needs.extract-version.outputs.timestamp }}
+          branch: ${{ github.ref_name }}
+
+  # Build CANN variant (Huawei Ascend NPU, supports multi-platform)
+  # Note: CANN Dockerfile exists in upstream .devops/ but is NOT in their workflow
+  # We build it for BodhiApp's Chinese market support
+  build-cann:
+    needs: extract-version
+    runs-on: ubuntu-latest-8-cores
+    timeout-minutes: 90
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push CANN image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: .devops/base-images/cann.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}:cann-${{ needs.extract-version.outputs.version }}
+            ${{ env.REGISTRY }}:latest-cann
+          build-args: |
+            BUILD_VERSION=${{ needs.extract-version.outputs.version }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIMESTAMP=${{ needs.extract-version.outputs.timestamp }}
+            BUILD_BRANCH=${{ github.ref_name }}
+          cache-from: type=gha,scope=cann
+          cache-to: type=gha,mode=max,scope=cann
+
+      - name: Create and upload build info
+        uses: ./.github/actions/create-build-info
+        with:
+          variant: cann
+          platforms: linux/amd64,linux/arm64
+          description: Huawei Ascend NPU (multi-platform)
+          dockerfile: .devops/base-images/cann.Dockerfile
+          build-status: ${{ steps.build.outcome }}
+          build-digest: ${{ steps.build.outputs.digest }}
+          registry: ${{ env.REGISTRY }}
+          version: ${{ needs.extract-version.outputs.version }}
+          commit-sha: ${{ github.sha }}
+          timestamp: ${{ needs.extract-version.outputs.timestamp }}
+          branch: ${{ github.ref_name }}
+
+  # Collect all build information into release.json artifact
+  collect-release-info:
+    needs: [extract-version, build-cpu, build-cuda, build-rocm, build-vulkan, build-musa, build-intel, build-cann]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build info artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: build-info-*
+          path: build-artifacts
+          merge-multiple: false
+
+      - name: Combine build info into release.json
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+        run: |
+          # Create the base structure
+          jq -n \
+            --arg version "${{ needs.extract-version.outputs.version }}" \
+            --arg tag "${{ github.ref_name }}" \
+            --arg registry "$REGISTRY" \
+            --arg commit_sha "${{ github.sha }}" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{
+              version: $version,
+              tag: $tag,
+              registry: $registry,
+              commit_sha: $commit_sha,
+              timestamp: $timestamp,
+              variants: []
+            }' > release.json
+
+          # Find all build-info JSON files
+          VARIANTS=$(find build-artifacts -name 'build-info-*.json' -type f | sort)
+
+          # Build the variants array
+          VARIANTS_JSON="[]"
+          for info_file in $VARIANTS; do
+            if [ -f "$info_file" ]; then
+              echo "Processing: $info_file"
+              VARIANT_DATA=$(cat "$info_file")
+              VARIANTS_JSON=$(echo "$VARIANTS_JSON" | jq --argjson variant "$VARIANT_DATA" '. + [$variant]')
+            fi
+          done
+
+          # Update release.json with variants
+          jq --argjson variants "$VARIANTS_JSON" '.variants = $variants' release.json > release.tmp.json
+          mv release.tmp.json release.json
+
+          # Pretty print the result
+          echo "Generated release.json:"
+          cat release.json | jq .
+
+      - name: Upload release info artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-info
+          path: release.json
+          retention-days: 90
+
+  # Create GitHub Release (flexible - succeeds if any variant builds)
+  create-release:
+    needs: [extract-version, build-cpu, build-cuda, build-rocm, build-vulkan, build-musa, build-intel, build-cann, collect-release-info]
+    if: always() && (needs.build-cpu.result == 'success' || needs.build-cuda.result == 'success' || needs.build-rocm.result == 'success' || needs.build-vulkan.result == 'success' || needs.build-musa.result == 'success' || needs.build-intel.result == 'success' || needs.build-cann.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release info artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-info
+          path: release-artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 'Base Images v${{ needs.extract-version.outputs.version }}'
+          body: |
+            # llama.cpp Base Images Release v${{ needs.extract-version.outputs.version }}
+            
+            Released on: **${{ needs.extract-version.outputs.readable_date }}**
+            Git commit: **${{ needs.extract-version.outputs.commit_hash }}**
+            
+            ## Available Images
+            
+            All images include embedded version metadata and are ready for BodhiApp integration.
+            
+            ### Build Results
+            
+            ${{ needs.build-cpu.result == 'success' && '✅ **CPU Runtime** (Platform: linux/amd64, linux/arm64)' || '❌ **CPU Runtime** - Build failed' }}
+            ${{ needs.build-cpu.result == 'success' && format('```bash
+            docker pull {0}:cpu-{1}
+            ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
+            
+            ${{ needs.build-cuda.result == 'success' && '✅ **CUDA Runtime** (Platform: linux/amd64) - *Includes CPU fallback*' || '❌ **CUDA Runtime** - Build failed' }}
+            ${{ needs.build-cuda.result == 'success' && format('```bash
+            docker pull {0}:cuda-{1}
+            ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
+
+            ${{ needs.build-rocm.result == 'success' && '✅ **ROCm Runtime** (Platform: linux/amd64)' || '❌ **ROCm Runtime** - Build failed' }}
+            ${{ needs.build-rocm.result == 'success' && format('```bash
+            docker pull {0}:rocm-{1}
+            ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
+
+            ${{ needs.build-vulkan.result == 'success' && '✅ **Vulkan Runtime** (Platform: linux/amd64)' || '❌ **Vulkan Runtime** - Build failed' }}
+            ${{ needs.build-vulkan.result == 'success' && format('```bash
+            docker pull {0}:vulkan-{1}
+            ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
+
+            ${{ needs.build-musa.result == 'success' && '✅ **MUSA Runtime** (Platform: linux/amd64) - *Moore Threads GPU*' || '❌ **MUSA Runtime** - Build failed' }}
+            ${{ needs.build-musa.result == 'success' && format('```bash
+            docker pull {0}:musa-{1}
+            ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
+
+            ${{ needs.build-intel.result == 'success' && '✅ **Intel Runtime** (Platform: linux/amd64) - *Intel GPU with SYCL*' || '❌ **Intel Runtime** - Build failed' }}
+            ${{ needs.build-intel.result == 'success' && format('```bash
+            docker pull {0}:intel-{1}
+            ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
+
+            ${{ needs.build-cann.result == 'success' && '✅ **CANN Runtime** (Platform: linux/amd64, linux/arm64) - *Huawei Ascend NPU*' || '❌ **CANN Runtime** - Build failed' }}
+            ${{ needs.build-cann.result == 'success' && format('```bash
+            docker pull {0}:cann-{1}
+            ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
+
+            ## Usage with BodhiApp
+            
+            ```dockerfile
+            # Use as base image in BodhiApp
+            ARG BASE_VARIANT=cpu
+            FROM ${{ env.REGISTRY }}:${BASE_VARIANT}-${{ needs.extract-version.outputs.version }} AS runtime-base
+            
+            # Your BodhiApp build continues...
+            # llama-server binary available at /app/bin/llama-server
+            ```
+            
+            ## Version Information
+            
+            Each image contains version metadata accessible at runtime:
+            ```bash
+            # Via Docker labels
+            docker inspect ${{ env.REGISTRY }}:cpu-${{ needs.extract-version.outputs.version }}
+            
+            # Via version file in container
+            docker run --rm ${{ env.REGISTRY }}:cpu-${{ needs.extract-version.outputs.version }} cat /app/version.json
+            ```
+            
+            ## Changelog
+            
+            - **Simplified Architecture**: Focus on llama-server binary only
+            - **Embedded Metadata**: Version, commit, timestamp info in images  
+            - **Multi-platform Support**: ARM64 support for CPU and Vulkan variants
+            - **BodhiApp Integration**: Clean inheritance pattern with predictable paths
+            - **Tag-based Versioning**: Timestamp-based versions for chronological ordering
+          draft: false
+          prerelease: false
+          files: |
+            release-artifacts/release.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build Summary
+  summary:
+    runs-on: ubuntu-latest
+    needs: [extract-version, build-cpu, build-cuda, build-rocm, build-vulkan, build-musa, build-intel, build-cann, create-release]
+    if: always()
+    steps:
+      - name: Build Summary
+        run: |
+          echo "## Base Images Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version Information:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ needs.extract-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Date: ${{ needs.extract-version.outputs.readable_date }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ needs.extract-version.outputs.commit_hash }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Registry: ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "**Build Results:**" >> $GITHUB_STEP_SUMMARY
+          echo "| Variant | Status | Platforms | Image Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|-----------|-----------|" >> $GITHUB_STEP_SUMMARY
+
+          # CPU
+          if [[ "${{ needs.build-cpu.result }}" == "success" ]]; then
+            echo "| CPU | ✅ Success | linux/amd64,linux/arm64 | llama.cpp:cpu-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| CPU | ❌ Failed | linux/amd64,linux/arm64 | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # CUDA
+          if [[ "${{ needs.build-cuda.result }}" == "success" ]]; then
+            echo "| CUDA | ✅ Success | linux/amd64 | llama.cpp:cuda-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| CUDA | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ROCm
+          if [[ "${{ needs.build-rocm.result }}" == "success" ]]; then
+            echo "| ROCm | ✅ Success | linux/amd64 | llama.cpp:rocm-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| ROCm | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Vulkan
+          if [[ "${{ needs.build-vulkan.result }}" == "success" ]]; then
+            echo "| Vulkan | ✅ Success | linux/amd64 | llama.cpp:vulkan-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Vulkan | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # MUSA
+          if [[ "${{ needs.build-musa.result }}" == "success" ]]; then
+            echo "| MUSA | ✅ Success | linux/amd64 | llama.cpp:musa-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| MUSA | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Intel
+          if [[ "${{ needs.build-intel.result }}" == "success" ]]; then
+            echo "| Intel | ✅ Success | linux/amd64 | llama.cpp:intel-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Intel | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # CANN
+          if [[ "${{ needs.build-cann.result }}" == "success" ]]; then
+            echo "| CANN | ✅ Success | linux/amd64,linux/arm64 | llama.cpp:cann-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| CANN | ❌ Failed | linux/amd64,linux/arm64 | - |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Next Steps:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Images are available at: ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Use in BodhiApp by setting BASE_VARIANT build arg" >> $GITHUB_STEP_SUMMARY
+          echo "- Version metadata available via labels and /app/version.json" >> $GITHUB_STEP_SUMMARY
