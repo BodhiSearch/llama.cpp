@@ -1,9 +1,12 @@
-define newline
+# BodhiApp custom targets - include our Makefile
+-include Makefile.bodhiapp
 
+# Default target: show help
+.DEFAULT_GOAL := help
 
-endef
-
-$(error Build system changed:$(newline)\
-The Makefile build has been replaced by CMake.$(newline)$(newline)\
-For build instructions see:$(newline)\
-https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md$(newline)${newline})
+help: ## Show all available targets with descriptions
+	@echo '================================================'
+	@echo '     BodhiApp llama.cpp - Available Targets'
+	@echo '================================================'
+	@echo ''
+	@$(MAKE) -s help-bodhiapp
