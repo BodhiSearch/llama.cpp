@@ -7,7 +7,6 @@ on:
         description: 'Create new release'
         required: true
         type: boolean
-  push:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
