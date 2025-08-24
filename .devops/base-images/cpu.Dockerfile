@@ -17,8 +17,10 @@ WORKDIR /app
 
 COPY . .
 
-RUN if [ "$TARGETARCH" = "amd64" ] || [ "$TARGETARCH" = "arm64" ]; then \
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,\$ORIGIN"; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=OFF -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,\$ORIGIN"; \
     else \
         echo "Unsupported architecture"; \
         exit 1; \
