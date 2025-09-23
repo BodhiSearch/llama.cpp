@@ -31,12 +31,11 @@ jobs:
       - name: Extract version information from tag
         id: version
         run: |
-          # Extract version from tag (base-images/v2508201420-abc1234 -> 2508201420-abc1234)
+          # Extract version from tag (base-images/v202509231420-abc1234 -> 202509231420-abc1234)
           if [[ $GITHUB_REF == refs/tags/base-images/v* ]]; then
             VERSION=${GITHUB_REF#refs/tags/base-images/v}
             TIMESTAMP=$(echo "$VERSION" | cut -d'-' -f1)
             COMMIT_HASH=$(echo "$VERSION" | cut -d'-' -f2)
-            READABLE_DATE=$(date -d "20$TIMESTAMP" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "Invalid timestamp")
           else
             echo "Error: Unsupported tag format: $GITHUB_REF"
             exit 1
@@ -44,8 +43,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
           echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
-          echo "readable_date=$READABLE_DATE" >> $GITHUB_OUTPUT
-          echo "Extracted version: $VERSION (Date: $READABLE_DATE, Commit: $COMMIT_HASH)"
+          echo "Extracted version: $VERSION (Timestamp: $TIMESTAMP, Commit: $COMMIT_HASH)"
 
   # Build CPU variant (supports multi-platform)
   build-cpu:

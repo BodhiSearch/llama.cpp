@@ -1,0 +1,273 @@
+# BodhiApp Release Management
+# This file contains release logic for llama-server binaries and delegation to base-images
+# It keeps the original Makefile clean while providing standardized release commands
+
+.PHONY: release-server release-base-images help-bodhiapp show-server-git-info validate-server-release clean-server-release sync-upstream sync-upstream-check
+
+# Function to check git branch status - borrowed from base-images/Makefile
+define check_git_branch
+	@CURRENT_BRANCH=$$(git branch --show-current) && \
+	if [ "$$CURRENT_BRANCH" != "master" ]; then \
+		read -p "Warning: You are not on master branch (current: $$CURRENT_BRANCH). Continue? [y/N] " confirm && \
+		if [ "$$confirm" != "y" ]; then \
+			echo "Aborting release." && exit 1; \
+		fi \
+	fi && \
+	echo "Fetching latest changes from remote..." && \
+	git fetch origin master && \
+	LOCAL_HEAD=$$(git rev-parse HEAD) && \
+	REMOTE_HEAD=$$(git rev-parse origin/master) && \
+	if [ "$$LOCAL_HEAD" != "$$REMOTE_HEAD" ]; then \
+		echo "Warning: Your local master branch is different from origin/master" && \
+		echo "Local:  $$LOCAL_HEAD" && \
+		echo "Remote: $$REMOTE_HEAD" && \
+		read -p "Continue anyway? [y/N] " confirm && \
+		if [ "$$confirm" != "y" ]; then \
+			echo "Aborting release." && exit 1; \
+		fi \
+	fi
+endef
+
+# Function to safely delete existing tag - borrowed from base-images/Makefile
+define delete_tag_if_exists
+	echo "Checking for existing tag $(1)..." && \
+	if git rev-parse "$(1)" >/dev/null 2>&1; then \
+		read -p "Tag $(1) already exists. Delete and recreate? [y/N] " confirm && \
+		if [ "$$confirm" = "y" ]; then \
+			echo "Deleting existing tag $(1)..." && \
+			git tag -d "$(1)" 2>/dev/null || true && \
+			git push --delete origin "$(1)" 2>/dev/null || true; \
+		else \
+			echo "Aborting release." && exit 1; \
+		fi \
+	fi
+endef
+
+# Function to create timestamp-based version (YYYYMMDDHHMM-hash format)
+define create_version_from_git
+	TIMESTAMP="$$(date +%Y%m%d%H%M)" && \
+	COMMIT_HASH="$$(git rev-parse --short=7 HEAD)" && \
+	VERSION="$$TIMESTAMP-$$COMMIT_HASH" && \
+	echo "$$VERSION"
+endef
+
+# Function to validate release prerequisites
+define validate_release_prerequisites
+	echo "Validating release prerequisites..." && \
+	if ! command -v git >/dev/null 2>&1; then \
+		echo "Error: git is required but not installed" && exit 1; \
+	fi && \
+	if ! git rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "Error: Not in a git repository" && exit 1; \
+	fi && \
+	if [ ! -f ".github/workflows/llama-server.yml" ]; then \
+		echo "Error: llama-server.yml workflow not found" && exit 1; \
+	fi && \
+	if ! git diff-index --quiet HEAD --; then \
+		echo "Error: Working directory has uncommitted changes. Please commit or reset changes before release." && exit 1; \
+	fi && \
+	echo "Prerequisites validated successfully"
+endef
+
+# Function to validate upstream sync prerequisites
+define validate_sync_prerequisites
+	echo "Validating sync prerequisites..." && \
+	if ! command -v git >/dev/null 2>&1; then \
+		echo "Error: git is required but not installed" && exit 1; \
+	fi && \
+	if ! git rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "Error: Not in a git repository" && exit 1; \
+	fi && \
+	if ! git remote get-url gg >/dev/null 2>&1; then \
+		echo "Error: 'gg' remote not configured. Please add upstream remote as 'gg'" && exit 1; \
+	fi && \
+	if ! git diff-index --quiet HEAD --; then \
+		echo "Error: Working directory has uncommitted changes. Please commit or reset changes before sync." && exit 1; \
+	fi && \
+	CURRENT_BRANCH=$$(git branch --show-current) && \
+	if [ "$$CURRENT_BRANCH" != "master" ]; then \
+		echo "Error: Must be on master branch for sync. Current branch: $$CURRENT_BRANCH" && exit 1; \
+	fi && \
+	echo "Sync prerequisites validated successfully"
+endef
+
+# Function to check changes in dockerfile
+define check_dockerfile_changes
+	if [ -f ".devops/$(1).Dockerfile" ]; then \
+		if GIT_PAGER=cat git diff --quiet master..gg/master -- ".devops/$(1).Dockerfile" 2>/dev/null; then \
+			echo "  $(1).Dockerfile: No changes"; \
+		else \
+			echo "  $(1).Dockerfile: CHANGED"; \
+			echo "    Stats: $$(GIT_PAGER=cat git diff --stat master..gg/master -- ".devops/$(1).Dockerfile" 2>/dev/null || echo "new/deleted file")"; \
+			echo "    Preview:"; \
+			GIT_PAGER=cat git diff master..gg/master -- ".devops/$(1).Dockerfile" 2>/dev/null | head -20 | sed 's/^/      /'; \
+			echo ""; \
+		fi \
+	fi
+endef
+
+# Function to check dockerfile for summary
+define check_dockerfile_summary
+	if [ -f ".devops/$(1).Dockerfile" ] && ! GIT_PAGER=cat git diff --quiet master..gg/master -- ".devops/$(1).Dockerfile" 2>/dev/null; then \
+		echo "  - .devops/$(1).Dockerfile (affects base-images/$(1).Dockerfile)"; \
+	fi
+endef
+
+# Generic release function - creates both branch and tag
+define do_release
+	@echo "Preparing to release $(2)..."
+	@$(call validate_release_prerequisites)
+	$(call check_git_branch)
+	@echo "Creating version from current date..."
+	@VERSION=$$($(call create_version_from_git)) && \
+	BRANCH_NAME="bodhiapp_$$VERSION" && \
+	TAG_NAME="$(1)/v$$VERSION" && \
+	echo "Version: $$VERSION" && \
+	echo "Release branch: $$BRANCH_NAME" && \
+	echo "Release tag: $$TAG_NAME" && \
+	$(call delete_tag_if_exists,$$TAG_NAME) && \
+	echo "Creating release branch $$BRANCH_NAME..." && \
+	if git show-ref --verify --quiet refs/heads/$$BRANCH_NAME; then \
+		echo "Branch $$BRANCH_NAME already exists, switching to it..." && \
+		git checkout $$BRANCH_NAME; \
+	else \
+		git checkout -b $$BRANCH_NAME; \
+	fi && \
+	echo "Pushing release branch to origin..." && \
+	git push origin $$BRANCH_NAME && \
+	echo "Creating and pushing release tag $$TAG_NAME..." && \
+	git tag "$$TAG_NAME" && \
+	git push origin "$$TAG_NAME" && \
+	echo "Switching back to master..." && \
+	git checkout master && \
+	echo "Release created successfully:" && \
+	echo "  Branch: $$BRANCH_NAME (for support/hotfixes)" && \
+	echo "  Tag: $$TAG_NAME (triggers CI/CD)" && \
+	echo "  GitHub workflow will handle the $(3) build and release."
+endef
+
+# Release binary builds (all platforms) - creates both branch and tag
+release-server: ## Release llama-server binaries (creates bodhiapp_YYYYMMDDHHMM branch + llama-server/vYYYYMMDDHHMM tag)
+	$(call do_release,llama-server,llama-server binaries,binary)
+
+# Release Docker base images (all variants) - creates both branch and tag
+release-base-images: ## Release Docker base images (creates bodhiapp_YYYYMMDDHHMM branch + base-images/vYYYYMMDDHHMM tag)
+	$(call do_release,base-images,Docker base images,Docker image)
+
+show-server-git-info: ## Show current git commit information for llama-server version generation
+	@echo "=== Git Information for llama-server Version Generation ==="
+	@COMMIT_HASH=$$(git rev-parse --short=7 HEAD) && \
+	VERSION=$$($(call create_version_from_git)) && \
+	BRANCH_NAME="bodhiapp_$$VERSION" && \
+	TAG_NAME="llama-server/v$$VERSION" && \
+	echo "Current commit: $$COMMIT_HASH" && \
+	echo "Current date: $$(date '+%Y-%m-%d %H:%M:%S')" && \
+	echo "Generated version: $$VERSION" && \
+	echo "Release branch: $$BRANCH_NAME" && \
+	echo "Release tag: $$TAG_NAME"
+	@echo "============================================="
+
+validate-server-release: ## Validate prerequisites for llama-server release
+	@$(call validate_release_prerequisites)
+	@echo "llama-server release validation completed successfully"
+
+clean-server-release: ## Remove local llama-server release tags (interactive)
+	@echo "Cleaning up local llama-server tags..."
+	@git tag -l "llama-server/v*" | while read tag; do \
+		read -p "Delete local tag $$tag? [y/N] " confirm && \
+		if [ "$$confirm" = "y" ]; then \
+			git tag -d "$$tag" && echo "Deleted: $$tag"; \
+		fi \
+	done
+
+sync-upstream-check: ## Check what would be synced from upstream (dry-run)
+	@echo "=== Upstream Sync Check ==="
+	@$(call validate_sync_prerequisites)
+	@echo "Fetching latest from upstream (gg)..."
+	@GIT_PAGER=cat git fetch gg
+	@echo ""
+	@echo "Commits in upstream (gg/master) not in our master:"
+	@GIT_PAGER=cat git log --oneline master..gg/master | head -10 || echo "  (none - we are up to date)"
+	@echo ""
+	@echo "Our commits that will be rebased on top of upstream:"
+	@GIT_PAGER=cat git log --oneline --grep="\[Amir\]" gg/master..master || echo "  (none - no custom commits)"
+	@echo ""
+	@echo "Total upstream commits ahead: $$(git rev-list --count master..gg/master)"
+	@echo "Total our commits to rebase: $$(git rev-list --count gg/master..master)"
+	@echo ""
+	@echo "=== Critical File Changes ==="
+	@echo ""
+	@echo "Dockerfile Changes (.devops/) - affects your base-images:"
+	@for dockerfile in cpu cuda rocm vulkan cann musa intel; do \
+		$(call check_dockerfile_changes,$$dockerfile); \
+	done
+	@echo ""
+	@echo "Workflow Changes (.github/workflows/server.yml) - affects your llama-server.yml:"
+	@if GIT_PAGER=cat git diff --quiet master..gg/master -- ".github/workflows/server.yml" 2>/dev/null; then \
+		echo "  server.yml: No changes"; \
+	else \
+		echo "  server.yml: CHANGED"; \
+		echo "    Stats: $$(GIT_PAGER=cat git diff --stat master..gg/master -- ".github/workflows/server.yml" 2>/dev/null || echo "new/deleted file")"; \
+		echo "    Preview:"; \
+		GIT_PAGER=cat git diff master..gg/master -- ".github/workflows/server.yml" 2>/dev/null | head -30 | sed 's/^/      /'; \
+		echo ""; \
+		echo "    Action: Review changes and manually port to llama-server.yml if needed"; \
+	fi
+	@echo ""
+	@echo "=== Summary ==="
+	@echo "Files to review manually:"
+	@for dockerfile in cpu cuda rocm vulkan cann musa intel; do \
+		$(call check_dockerfile_summary,$$dockerfile); \
+	done
+	@if ! GIT_PAGER=cat git diff --quiet master..gg/master -- ".github/workflows/server.yml" 2>/dev/null; then \
+		echo "  - .github/workflows/server.yml (affects llama-server.yml)"; \
+	fi
+	@echo ""
+	@echo "To proceed with sync: make sync-upstream"
+
+sync-upstream: ## Fetch upstream and rebase master preserving our changes (does not push)
+	@echo "=== Syncing with Upstream ==="
+	@$(call validate_sync_prerequisites)
+	@echo "Fetching latest from upstream (gg)..."
+	@GIT_PAGER=cat git fetch gg
+	@echo "Rebasing master onto gg/master..."
+	@if GIT_PAGER=cat git rebase gg/master; then \
+		echo "Rebase completed successfully!"; \
+		echo ""; \
+		echo "Summary:"; \
+		echo "  Master branch rebased onto latest upstream"; \
+		echo "  Your changes preserved on top"; \
+		echo ""; \
+		echo "Next steps:"; \
+		echo "  1. Review the rebased commits: git log --oneline -10"; \
+		echo "  2. Test your changes"; \
+		echo "  3. Push to origin when ready: git push origin master --force-with-lease"; \
+	else \
+		echo ""; \
+		echo "Rebase failed due to conflicts."; \
+		echo "Please resolve conflicts manually:"; \
+		echo "  1. Edit conflicted files"; \
+		echo "  2. git add <resolved-files>"; \
+		echo "  3. git rebase --continue"; \
+		echo "  4. Or abort: git rebase --abort"; \
+		exit 1; \
+	fi
+
+# Show BodhiApp-specific targets
+help-bodhiapp: ## Show BodhiApp release targets
+	@echo ''
+	@echo 'BodhiApp Release Targets:'
+	@echo '  make release-server           - Release llama-server binaries (creates branch + tag)'
+	@echo '  make release-base-images      - Release Docker base images (creates branch + tag)'
+	@echo '  make show-server-git-info     - Show version info for releases'
+	@echo '  make validate-server-release  - Validate release prerequisites'
+	@echo '  make clean-server-release     - Clean local release tags'
+	@echo ''
+	@echo 'BodhiApp Upstream Sync Targets:'
+	@echo '  make sync-upstream-check      - Check what would be synced (dry-run)'
+	@echo '  make sync-upstream            - Rebase master on upstream (does not push)'
+	@echo ''
+	@echo 'BodhiApp Help:'
+	@echo '  make help-bodhiapp            - Show this help message'
+	@echo ''
+	@echo 'For more details, see README-bodhiapp.md'
