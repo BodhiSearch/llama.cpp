@@ -1,6 +1,9 @@
 name: llama-server standalone
 
 on:
+  push:
+    tags:
+      - 'llama-server/v*'  # Only triggered by version tags like llama-server/v2508201420-abc1234
   workflow_dispatch: # allows manual triggering
     inputs:
       create_release:
@@ -21,7 +24,43 @@ env:
   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
 
 jobs:
+  # Extract version information from tag (similar to base-images pattern)
+  extract-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      commit_hash: ${{ steps.version.outputs.commit_hash }}
+      timestamp: ${{ steps.version.outputs.timestamp }}
+      readable_date: ${{ steps.version.outputs.readable_date }}
+      triggered_by_tag: ${{ steps.version.outputs.triggered_by_tag }}
+    steps:
+      - name: Extract version information from tag
+        id: version
+        run: |
+          # Check if triggered by tag or manual dispatch
+          if [[ $GITHUB_REF == refs/tags/llama-server/v* ]]; then
+            # Extract version from tag (llama-server/v2508201420-abc1234 -> 2508201420-abc1234)
+            VERSION=${GITHUB_REF#refs/tags/llama-server/v}
+            TIMESTAMP=$(echo "$VERSION" | cut -d'-' -f1)
+            COMMIT_HASH=$(echo "$VERSION" | cut -d'-' -f2)
+            READABLE_DATE=$(date -d "20$TIMESTAMP" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "Invalid timestamp")
+            TRIGGERED_BY_TAG="true"
+          else
+            # Manual trigger - create version from current commit
+            COMMIT_HASH="$(git rev-parse --short=7 HEAD)"
+            TIMESTAMP="$(date +%y%m%d%H%M)"
+            VERSION="${TIMESTAMP}-${COMMIT_HASH}"
+            READABLE_DATE="$(date '+%Y-%m-%d %H:%M')"
+            TRIGGERED_BY_TAG="false"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+          echo "timestamp=$TIMESTAMP" >> $GITHUB_OUTPUT
+          echo "readable_date=$READABLE_DATE" >> $GITHUB_OUTPUT
+          echo "triggered_by_tag=$TRIGGERED_BY_TAG" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION (Date: $READABLE_DATE, Commit: $COMMIT_HASH, Tag: $TRIGGERED_BY_TAG)"
   macos-arm64:
+    needs: extract-version
     runs-on: macos-14
     strategy:
       matrix:
@@ -63,6 +102,7 @@ jobs:
           path: build/bin/llama-server
 
   ubuntu-cpu:
+    needs: extract-version
     runs-on: ubuntu-22.04
     steps:
       - name: Clone
@@ -91,6 +131,7 @@ jobs:
           path: build/bin/llama-server
 
   ubuntu-arm64:
+    needs: extract-version
     runs-on: ubuntu-22.04
     steps:
       - name: Clone
@@ -398,6 +439,7 @@ jobs:
           path: build/bin/Release/llama-server.exe
 
   windows-cpu:
+    needs: extract-version
     runs-on: windows-latest
 
     env:
@@ -654,6 +696,7 @@ jobs:
     if: always() || github.event.inputs.create_release == 'true'
     runs-on: ubuntu-latest
     needs:
+      - extract-version
       - macos-arm64
       - ubuntu-cpu
       - ubuntu-arm64
@@ -679,13 +722,19 @@ jobs:
         id: tag
         shell: bash
         run: |
-          BUILD_NUMBER="$(git rev-list --count HEAD)"
-          SHORT_HASH="$(git rev-parse --short=7 HEAD)"
-          if [[ "${{ env.BRANCH_NAME }}" == "master" ]]; then
-            echo "name=server-b${BUILD_NUMBER}" >> $GITHUB_OUTPUT
+          if [[ "${{ needs.extract-version.outputs.triggered_by_tag }}" == "true" ]]; then
+            # Use version from tag
+            echo "name=server-${{ needs.extract-version.outputs.version }}" >> $GITHUB_OUTPUT
           else
-            SAFE_NAME=$(echo "${{ env.BRANCH_NAME }}" | tr '/' '-')
-            echo "name=server-${SAFE_NAME}-b${BUILD_NUMBER}-${SHORT_HASH}" >> $GITHUB_OUTPUT
+            # Manual trigger - use legacy naming for compatibility
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            SHORT_HASH="$(git rev-parse --short=7 HEAD)"
+            if [[ "${{ env.BRANCH_NAME }}" == "master" ]]; then
+              echo "name=server-b${BUILD_NUMBER}" >> $GITHUB_OUTPUT
+            else
+              SAFE_NAME=$(echo "${{ env.BRANCH_NAME }}" | tr '/' '-')
+              echo "name=server-${SAFE_NAME}-b${BUILD_NUMBER}-${SHORT_HASH}" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: Download artifacts

@@ -1,6 +1,6 @@
-ifndef LLAMA_MAKEFILE
-$(error The Makefile build is deprecated. Use the CMake build instead. For more details, see https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md)
-endif
+# ifndef LLAMA_MAKEFILE
+# $(error The Makefile build is deprecated. Use the CMake build instead. For more details, see https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md)
+# endif
 
 # Define the default target now so that it is always the first target
 BUILD_TARGETS = \
@@ -211,7 +211,7 @@ ifdef GGML_VULKAN
 	BUILD_TARGETS += vulkan-shaders-gen
 endif
 
-default: $(BUILD_TARGETS) $(LEGACY_TARGETS_BUILD)
+# default: $(BUILD_TARGETS) $(LEGACY_TARGETS_BUILD)
 
 test: $(TEST_TARGETS)
 	@failures=0; \
@@ -1606,3 +1606,6 @@ ifneq (,$(wildcard embedding))
 	@echo "  Remove the 'embedding' binary to remove this warning."
 	@echo "#########"
 endif
+
+# BodhiApp custom targets - include our Makefile
+-include Makefile.bodhiapp

@@ -1,0 +1,136 @@
+# BodhiApp Release Management
+# This file contains release logic for llama-server binaries and delegation to base-images
+# It keeps the original Makefile clean while providing standardized release commands
+
+.PHONY: release-server release-base-images help-bodhiapp show-server-git-info validate-server-release clean-server-release
+
+# Function to check git branch status - borrowed from base-images/Makefile
+define check_git_branch
+	@CURRENT_BRANCH=$$(git branch --show-current) && \
+	if [ "$$CURRENT_BRANCH" != "master" ]; then \
+		read -p "Warning: You are not on master branch (current: $$CURRENT_BRANCH). Continue? [y/N] " confirm && \
+		if [ "$$confirm" != "y" ]; then \
+			echo "Aborting release." && exit 1; \
+		fi \
+	fi && \
+	echo "Fetching latest changes from remote..." && \
+	git fetch origin master && \
+	LOCAL_HEAD=$$(git rev-parse HEAD) && \
+	REMOTE_HEAD=$$(git rev-parse origin/master) && \
+	if [ "$$LOCAL_HEAD" != "$$REMOTE_HEAD" ]; then \
+		echo "Warning: Your local master branch is different from origin/master" && \
+		echo "Local:  $$LOCAL_HEAD" && \
+		echo "Remote: $$REMOTE_HEAD" && \
+		read -p "Continue anyway? [y/N] " confirm && \
+		if [ "$$confirm" != "y" ]; then \
+			echo "Aborting release." && exit 1; \
+		fi \
+	fi
+endef
+
+# Function to safely delete existing tag - borrowed from base-images/Makefile
+define delete_tag_if_exists
+	echo "Checking for existing tag $(1)..." && \
+	if git rev-parse "$(1)" >/dev/null 2>&1; then \
+		read -p "Tag $(1) already exists. Delete and recreate? [y/N] " confirm && \
+		if [ "$$confirm" = "y" ]; then \
+			echo "Deleting existing tag $(1)..." && \
+			git tag -d "$(1)" 2>/dev/null || true && \
+			git push --delete origin "$(1)" 2>/dev/null || true; \
+		else \
+			echo "Aborting release." && exit 1; \
+		fi \
+	fi
+endef
+
+# Function to create timestamp-based version from git commit
+define create_version_from_git
+	COMMIT_TIMESTAMP=$$(git log -1 --format=%ct) && \
+	COMMIT_HASH=$$(git rev-parse --short=7 HEAD) && \
+	if [ "$$(uname)" = "Darwin" ]; then \
+		VERSION="$$(date -r $$COMMIT_TIMESTAMP +%y%m%d%H%M)-$$COMMIT_HASH"; \
+	else \
+		VERSION="$$(date -d @$$COMMIT_TIMESTAMP +%y%m%d%H%M)-$$COMMIT_HASH"; \
+	fi && \
+	echo "$$VERSION"
+endef
+
+# Function to validate release prerequisites
+define validate_release_prerequisites
+	echo "Validating release prerequisites..." && \
+	if ! command -v git >/dev/null 2>&1; then \
+		echo "Error: git is required but not installed" && exit 1; \
+	fi && \
+	if ! git rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "Error: Not in a git repository" && exit 1; \
+	fi && \
+	if [ ! -f ".github/workflows/llama-server.yml" ]; then \
+		echo "Error: llama-server.yml workflow not found" && exit 1; \
+	fi && \
+	echo "Prerequisites validated successfully"
+endef
+
+# Release binary builds (all platforms)
+release-server: ## Release llama-server binaries (creates llama-server/v{timestamp}-{hash} tag)
+	@echo "Preparing to release llama-server binaries..."
+	@$(call validate_release_prerequisites)
+	$(call check_git_branch)
+	@echo "Creating version from current git commit..."
+	@VERSION=$$($(call create_version_from_git)) && \
+	TAG_NAME="llama-server/v$$VERSION" && \
+	echo "New version from git commit: $$VERSION" && \
+	echo "Tag to create: $$TAG_NAME" && \
+	$(call delete_tag_if_exists,$$TAG_NAME) && \
+	echo "Creating llama-server release tag $$TAG_NAME..." && \
+	git tag "$$TAG_NAME" && \
+	git push origin "$$TAG_NAME" && \
+	echo "llama-server release tag $$TAG_NAME pushed. GitHub workflow will handle the binary build and release."
+
+# Release Docker base images (all variants)
+release-base-images: ## Release Docker base images (creates base-images/v{timestamp}-{hash} tag)
+	@echo "Starting base images release..."
+	@$(MAKE) -C .devops/base-images release-base-images
+
+show-server-git-info: ## Show current git commit information for llama-server version generation
+	@echo "=== Git Information for llama-server Version Generation ==="
+	@COMMIT_TIMESTAMP=$$(git log -1 --format=%ct) && \
+	COMMIT_HASH=$$(git rev-parse --short=7 HEAD) && \
+	if [ "$$(uname)" = "Darwin" ]; then \
+		READABLE_DATE=$$(date -r $$COMMIT_TIMESTAMP "+%Y-%m-%d %H:%M:%S") && \
+		VERSION="$$(date -r $$COMMIT_TIMESTAMP +%y%m%d%H%M)-$$COMMIT_HASH"; \
+	else \
+		READABLE_DATE=$$(date -d @$$COMMIT_TIMESTAMP "+%Y-%m-%d %H:%M:%S") && \
+		VERSION="$$(date -d @$$COMMIT_TIMESTAMP +%y%m%d%H%M)-$$COMMIT_HASH"; \
+	fi && \
+	echo "Current commit: $$COMMIT_HASH" && \
+	echo "Commit timestamp: $$COMMIT_TIMESTAMP" && \
+	echo "Readable date: $$READABLE_DATE" && \
+	echo "Generated version: $$VERSION" && \
+	echo "Tag would be: llama-server/v$$VERSION"
+	@echo "============================================="
+
+validate-server-release: ## Validate prerequisites for llama-server release
+	@$(call validate_release_prerequisites)
+	@echo "llama-server release validation completed successfully"
+
+clean-server-release: ## Remove local llama-server release tags (interactive)
+	@echo "Cleaning up local llama-server tags..."
+	@git tag -l "llama-server/v*" | while read tag; do \
+		read -p "Delete local tag $$tag? [y/N] " confirm && \
+		if [ "$$confirm" = "y" ]; then \
+			git tag -d "$$tag" && echo "Deleted: $$tag"; \
+		fi \
+	done
+
+# Show BodhiApp-specific targets
+help-bodhiapp: ## Show BodhiApp release targets
+	@echo ''
+	@echo 'BodhiApp Release Targets:'
+	@echo '  make release-server           - Release llama-server binaries for all platforms'
+	@echo '  make release-base-images      - Release Docker base images for all variants'
+	@echo '  make show-server-git-info     - Show llama-server version info'
+	@echo '  make validate-server-release  - Validate llama-server release prerequisites'
+	@echo '  make clean-server-release     - Clean local llama-server tags'
+	@echo '  make help-bodhiapp            - Show this help message'
+	@echo ''
+	@echo 'For more details, see README-bodhiapp.md'
