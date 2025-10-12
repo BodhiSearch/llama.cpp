@@ -2,7 +2,7 @@
 # This file contains release logic for llama-server binaries and delegation to base-images
 # It keeps the original Makefile clean while providing standardized release commands
 
-.PHONY: release-server release-base-images help-bodhiapp show-server-git-info validate-server-release clean-server-release sync-upstream sync-upstream-check
+.PHONY: release-server release-base-images help-bodhiapp show-server-git-info validate-server-release clean-server-release sync-upstream sync-upstream-check build-mac-metal build-mac-cpu build-local clean-build
 
 # Function to check git branch status - borrowed from base-images/Makefile
 define check_git_branch
@@ -180,6 +180,74 @@ clean-server-release: ## Remove local llama-server release tags (interactive)
 		fi \
 	done
 
+# Local build configuration
+BUILD_DIR := build
+BIN_DIR := bin/local
+CMAKE_COMMON_FLAGS := -DLLAMA_FATAL_WARNINGS=OFF -DLLAMA_CURL=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release
+
+# Detect number of CPUs for parallel builds
+ifeq ($(shell uname -s),Darwin)
+  NCPU := $(shell sysctl -n hw.logicalcpu)
+else
+  NCPU := $(shell nproc)
+endif
+
+build-mac-metal: ## Build llama-server for Apple Silicon with Metal GPU support (macOS only)
+	@echo "Building llama-server for Apple Silicon with Metal GPU support..."
+	@if [ "$$(uname -s)" != "Darwin" ]; then \
+		echo "Error: This target is only for macOS" && exit 1; \
+	fi
+	@if [ "$$(uname -m)" != "arm64" ]; then \
+		echo "Error: This target requires Apple Silicon (arm64)" && exit 1; \
+	fi
+	@rm -rf $(BUILD_DIR)
+	@UNAME_S=Darwin UNAME_P=arm64 UNAME_M=arm64 cmake -S . -B $(BUILD_DIR) \
+		-DGGML_METAL_EMBED_LIBRARY=ON \
+		$(CMAKE_COMMON_FLAGS)
+	@cmake --build $(BUILD_DIR) --config Release -j $(NCPU) --target llama-server
+	@mkdir -p $(BIN_DIR)/aarch64-apple-darwin/metal
+	@cp $(BUILD_DIR)/bin/llama-server $(BIN_DIR)/aarch64-apple-darwin/metal/
+	@echo "✓ Built: $(BIN_DIR)/aarch64-apple-darwin/metal/llama-server"
+
+build-mac-cpu: ## Build llama-server for Apple Silicon CPU-only (macOS only)
+	@echo "Building llama-server for Apple Silicon CPU-only..."
+	@if [ "$$(uname -s)" != "Darwin" ]; then \
+		echo "Error: This target is only for macOS" && exit 1; \
+	fi
+	@if [ "$$(uname -m)" != "arm64" ]; then \
+		echo "Error: This target requires Apple Silicon (arm64)" && exit 1; \
+	fi
+	@rm -rf $(BUILD_DIR)
+	@UNAME_S=Darwin UNAME_P=arm64 UNAME_M=arm64 cmake -S . -B $(BUILD_DIR) \
+		-DGGML_METAL_EMBED_LIBRARY=OFF \
+		-DGGML_METAL=OFF \
+		$(CMAKE_COMMON_FLAGS)
+	@cmake --build $(BUILD_DIR) --config Release -j $(NCPU) --target llama-server
+	@mkdir -p $(BIN_DIR)/aarch64-apple-darwin/cpu
+	@cp $(BUILD_DIR)/bin/llama-server $(BIN_DIR)/aarch64-apple-darwin/cpu/
+	@echo "✓ Built: $(BIN_DIR)/aarch64-apple-darwin/cpu/llama-server"
+
+build-local: ## Build llama-server for current platform (auto-detects Metal/CPU on Mac)
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		if [ "$$(uname -m)" = "arm64" ]; then \
+			echo "Detected: Apple Silicon (building with Metal GPU support)"; \
+			$(MAKE) build-mac-metal; \
+		else \
+			echo "Detected: Intel Mac (Metal not supported, building CPU-only)"; \
+			echo "Error: Intel Mac build not yet implemented" && exit 1; \
+		fi \
+	else \
+		echo "Error: Local builds currently only supported on macOS"; \
+		echo "For Linux builds, use Docker or see BodhiApp build instructions"; \
+		exit 1; \
+	fi
+
+clean-build: ## Clean local build artifacts
+	@echo "Cleaning local build artifacts..."
+	@rm -rf $(BUILD_DIR)
+	@rm -rf $(BIN_DIR)
+	@echo "✓ Build artifacts cleaned"
+
 sync-upstream-check: ## Check what would be synced from upstream (dry-run)
 	@echo "=== Upstream Sync Check ==="
 	@$(call validate_sync_prerequisites)
@@ -254,20 +322,10 @@ sync-upstream: ## Fetch upstream and rebase master preserving our changes (does 
 	fi
 
 # Show BodhiApp-specific targets
-help-bodhiapp: ## Show BodhiApp release targets
+help-bodhiapp: ## Show all available BodhiApp targets
+	@echo 'Available Targets:'
 	@echo ''
-	@echo 'BodhiApp Release Targets:'
-	@echo '  make release-server           - Release llama-server binaries (creates branch + tag)'
-	@echo '  make release-base-images      - Release Docker base images (creates branch + tag)'
-	@echo '  make show-server-git-info     - Show version info for releases'
-	@echo '  make validate-server-release  - Validate release prerequisites'
-	@echo '  make clean-server-release     - Clean local release tags'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9._-]+:.*?## / {printf "  \033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@echo ''
-	@echo 'BodhiApp Upstream Sync Targets:'
-	@echo '  make sync-upstream-check      - Check what would be synced (dry-run)'
-	@echo '  make sync-upstream            - Rebase master on upstream (does not push)'
+	@echo '\033[2mFor detailed documentation, see README-bodhiapp.md\033[0m'
 	@echo ''
-	@echo 'BodhiApp Help:'
-	@echo '  make help-bodhiapp            - Show this help message'
-	@echo ''
-	@echo 'For more details, see README-bodhiapp.md'
