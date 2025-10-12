@@ -46,7 +46,9 @@ jobs:
           echo "Extracted version: $VERSION (Timestamp: $TIMESTAMP, Commit: $COMMIT_HASH)"
 
   # Build CPU variant (supports multi-platform)
+  # Temporarily disabled to test CANN and Vulkan fixes
   build-cpu:
+    if: false
     needs: extract-version
     runs-on: ubuntu-latest-8-cores
     timeout-minutes: 60
@@ -85,7 +87,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=cpu
 
   # Build CUDA variant (x86_64 only)
+  # Temporarily disabled to test CANN and Vulkan fixes
   build-cuda:
+    if: false
     needs: extract-version
     runs-on: ubuntu-latest-8-cores
     timeout-minutes: 90
@@ -124,7 +128,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=cuda
 
   # Build ROCm variant (x86_64 only)
+  # Temporarily disabled to test CANN and Vulkan fixes
   build-rocm:
+    if: false
     needs: extract-version
     runs-on: ubuntu-latest-8-cores
     timeout-minutes: 90
@@ -204,7 +210,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=vulkan
 
   # Build MUSA variant (Moore Threads GPU, x86_64 only)
+  # Temporarily disabled to test CANN and Vulkan fixes
   build-musa:
+    if: false
     needs: extract-version
     runs-on: ubuntu-latest-8-cores
     timeout-minutes: 90
@@ -243,7 +251,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=musa
 
   # Build Intel variant (Intel GPU with SYCL, x86_64 only)
+  # Temporarily disabled to test CANN and Vulkan fixes
   build-intel:
+    if: false
     needs: extract-version
     runs-on: ubuntu-latest-8-cores
     timeout-minutes: 90
@@ -323,9 +333,10 @@ jobs:
           cache-to: type=gha,mode=max,scope=cann
 
   # Create GitHub Release (flexible - succeeds if any variant builds)
+  # Temporarily only testing Vulkan and CANN
   create-release:
-    needs: [extract-version, build-cpu, build-cuda, build-rocm, build-vulkan, build-musa, build-intel, build-cann]
-    if: always() && (needs.build-cpu.result == 'success' || needs.build-cuda.result == 'success' || needs.build-rocm.result == 'success' || needs.build-vulkan.result == 'success' || needs.build-musa.result == 'success' || needs.build-intel.result == 'success' || needs.build-cann.result == 'success')
+    needs: [extract-version, build-vulkan, build-cann]
+    if: always() && (needs.build-vulkan.result == 'success' || needs.build-cann.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Create GitHub Release
@@ -415,9 +426,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Build Summary
+  # Temporarily only testing Vulkan and CANN
   summary:
     runs-on: ubuntu-latest
-    needs: [extract-version, build-cpu, build-cuda, build-rocm, build-vulkan, build-musa, build-intel, build-cann, create-release]
+    needs: [extract-version, build-vulkan, build-cann, create-release]
     if: always()
     steps:
       - name: Build Summary
@@ -435,46 +447,11 @@ jobs:
           echo "| Variant | Status | Platforms | Image Tag |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|--------|-----------|-----------|" >> $GITHUB_STEP_SUMMARY
 
-          # CPU
-          if [[ "${{ needs.build-cpu.result }}" == "success" ]]; then
-            echo "| CPU | ✅ Success | linux/amd64,linux/arm64 | llama.cpp:cpu-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| CPU | ❌ Failed | linux/amd64,linux/arm64 | - |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # CUDA
-          if [[ "${{ needs.build-cuda.result }}" == "success" ]]; then
-            echo "| CUDA | ✅ Success | linux/amd64 | llama.cpp:cuda-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| CUDA | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # ROCm
-          if [[ "${{ needs.build-rocm.result }}" == "success" ]]; then
-            echo "| ROCm | ✅ Success | linux/amd64 | llama.cpp:rocm-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| ROCm | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
-          fi
-
           # Vulkan
           if [[ "${{ needs.build-vulkan.result }}" == "success" ]]; then
             echo "| Vulkan | ✅ Success | linux/amd64 | llama.cpp:vulkan-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| Vulkan | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # MUSA
-          if [[ "${{ needs.build-musa.result }}" == "success" ]]; then
-            echo "| MUSA | ✅ Success | linux/amd64 | llama.cpp:musa-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| MUSA | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # Intel
-          if [[ "${{ needs.build-intel.result }}" == "success" ]]; then
-            echo "| Intel | ✅ Success | linux/amd64 | llama.cpp:intel-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "| Intel | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
           fi
 
           # CANN
