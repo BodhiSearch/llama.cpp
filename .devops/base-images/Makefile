@@ -103,7 +103,7 @@ build-local: ## Build base images locally for testing (requires Docker Buildx)
 	fi
 	@VERSION=$$($(call create_version_from_git)) && \
 	echo "Building with version: $$VERSION" && \
-	for variant in cpu cuda rocm vulkan; do \
+	for variant in cpu cuda rocm vulkan musa intel cann; do \
 		echo "Building $$variant variant..." && \
 		docker buildx build \
 			--load \
@@ -120,7 +120,7 @@ build-local: ## Build base images locally for testing (requires Docker Buildx)
 test-local-images: ## Test locally built images
 	@echo "Testing locally built base images..."
 	@VERSION=$$($(call create_version_from_git)) && \
-	for variant in cpu cuda rocm vulkan; do \
+	for variant in cpu cuda rocm vulkan musa intel cann; do \
 		echo "Testing $$variant variant..." && \
 		docker run --rm "llama.cpp:$$VERSION-$$variant" --version || echo "Warning: $$variant test failed" && \
 		echo "Testing version metadata for $$variant..." && \
@@ -130,7 +130,7 @@ test-local-images: ## Test locally built images
 clean-local-images: ## Clean up locally built images
 	@echo "Cleaning up locally built base images..."
 	@VERSION=$$($(call create_version_from_git)) && \
-	for variant in cpu cuda rocm vulkan; do \
+	for variant in cpu cuda rocm vulkan musa intel cann; do \
 		docker rmi "llama.cpp:$$VERSION-$$variant" 2>/dev/null || true; \
 	done && \
 	echo "Cleanup complete"

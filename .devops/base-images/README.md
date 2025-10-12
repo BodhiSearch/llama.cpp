@@ -56,6 +56,9 @@ Our Dockerfiles are **directly adapted from the proven configurations** in llama
 | **CUDA**   | `linux/amd64`                | NVIDIA GPU        | `ghcr.io/bodhisearch/llama.cpp:latest-cuda`   | `ghcr.io/bodhisearch/llama.cpp:cuda-VERSION`   |
 | **ROCm**   | `linux/amd64`                | AMD GPU           | `ghcr.io/bodhisearch/llama.cpp:latest-rocm`   | `ghcr.io/bodhisearch/llama.cpp:rocm-VERSION`   |
 | **Vulkan** | `linux/amd64`*               | Cross-vendor GPU  | `ghcr.io/bodhisearch/llama.cpp:latest-vulkan` | `ghcr.io/bodhisearch/llama.cpp:vulkan-VERSION` |
+| **MUSA**   | `linux/amd64`                | Moore Threads GPU | `ghcr.io/bodhisearch/llama.cpp:latest-musa`   | `ghcr.io/bodhisearch/llama.cpp:musa-VERSION`   |
+| **Intel**  | `linux/amd64`                | Intel GPU (SYCL)  | `ghcr.io/bodhisearch/llama.cpp:latest-intel`  | `ghcr.io/bodhisearch/llama.cpp:intel-VERSION`  |
+| **CANN**   | `linux/amd64`, `linux/arm64` | Huawei Ascend NPU | `ghcr.io/bodhisearch/llama.cpp:latest-cann`   | `ghcr.io/bodhisearch/llama.cpp:cann-VERSION`   |
 
 \* *ARM64 support temporarily disabled due to [upstream build issues](https://github.com/ggml-org/llama.cpp/issues/11888)*
 
@@ -193,8 +196,14 @@ Each base image follows **BodhiApp's folder convention** for organized multi-var
 
 # GPU variants (x86_64 only):
 /app/bin/x86_64-unknown-linux-gnu/cuda/llama-server
-/app/bin/x86_64-unknown-linux-gnu/rocm/llama-server  
+/app/bin/x86_64-unknown-linux-gnu/rocm/llama-server
 /app/bin/x86_64-unknown-linux-gnu/vulkan/llama-server
+/app/bin/x86_64-unknown-linux-gnu/musa/llama-server
+/app/bin/x86_64-unknown-linux-gnu/intel/llama-server
+
+# CANN variants (multi-platform):
+/app/bin/x86_64-unknown-linux-gnu/cann/llama-server
+/app/bin/aarch64-unknown-linux-gnu/cann/llama-server
 ```
 
 **Key Features:**
@@ -288,6 +297,22 @@ CMD ["serve"]
 - **Drivers**: Vulkan-compatible drivers (NVIDIA, AMD, Intel)
 - **Devices**: Mount `/dev/dri` for hardware access
 - **Cross-vendor**: Works with any Vulkan 1.3+ compatible GPU
+
+### Moore Threads MUSA
+- **Driver**: MUSA drivers rc4.3.0+ required on host
+- **Devices**: MUSA device access configured automatically
+- **GPUs**: Moore Threads MTT S series GPUs (Chinese vendor)
+
+### Intel GPU (SYCL/OneAPI)
+- **Driver**: Intel GPU drivers with OneAPI support
+- **Runtime**: Intel Deep Learning Essentials 2025.2.2+
+- **GPUs**: Intel Arc, Iris Xe, Data Center GPU Max series
+
+### Huawei Ascend CANN
+- **Driver**: CANN 8.1+ drivers required on host
+- **Devices**: Ascend NPU device access
+- **NPUs**: Ascend 910B3, 310P series (Chinese vendor)
+- **Platforms**: Supports both x86_64 and aarch64 architectures
 
 ## Troubleshooting
 
