@@ -13,6 +13,8 @@ ARG VULKAN_SDK_VERSION=1.4.321.1
 RUN apt update && apt install -y git build-essential cmake wget xz-utils
 
 # Install Vulkan SDK
+# Note: Currently only x86_64 is supported. ARM64 has Vulkan SDK extraction issues.
+# This matches upstream behavior - see https://github.com/ggml-org/llama.cpp/issues/11888
 RUN ARCH=$(uname -m) && \
     wget -qO /tmp/vulkan-sdk.tar.xz https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkan-sdk-linux-${ARCH}-${VULKAN_SDK_VERSION}.tar.xz && \
     mkdir -p /opt/vulkan && \
@@ -42,18 +44,10 @@ RUN cmake -B build -DGGML_NATIVE=OFF -DGGML_VULKAN=1 -DLLAMA_BUILD_TESTS=OFF -DG
 RUN mkdir -p /app/lib && \
     find build -name "*.so" -exec cp {} /app/lib \;
 
-# BodhiApp: Create BodhiApp-compatible folder structure with platform detection
-RUN TARGETARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
-    if [ "$TARGETARCH" = "amd64" ]; then \
-        PLATFORM_TRIPLE="x86_64-unknown-linux-gnu"; \
-    elif [ "$TARGETARCH" = "arm64" ]; then \
-        PLATFORM_TRIPLE="aarch64-unknown-linux-gnu"; \
-    else \
-        echo "Unsupported architecture: $TARGETARCH"; exit 1; \
-    fi && \
-    mkdir -p /app/bin/$PLATFORM_TRIPLE/vulkan && \
-    cp build/bin/llama-server /app/bin/$PLATFORM_TRIPLE/vulkan/ && \
-    cp /app/lib/*.so /app/bin/$PLATFORM_TRIPLE/vulkan/ 2>/dev/null || true
+# BodhiApp: Create BodhiApp-compatible folder structure (x86_64 only)
+RUN mkdir -p /app/bin/x86_64-unknown-linux-gnu/vulkan && \
+    cp build/bin/llama-server /app/bin/x86_64-unknown-linux-gnu/vulkan/ && \
+    cp /app/lib/*.so /app/bin/x86_64-unknown-linux-gnu/vulkan/ 2>/dev/null || true
 
 ## Base image
 FROM ubuntu:$UBUNTU_VERSION AS base
@@ -99,7 +93,7 @@ LABEL bodhi.build.timestamp="${BUILD_TIMESTAMP}"
 LABEL bodhi.build.branch="${BUILD_BRANCH}"
 LABEL bodhi.variant="vulkan"
 LABEL bodhi.vulkan.version="${VULKAN_SDK_VERSION}"
-LABEL bodhi.platform.compatibility="x86_64,aarch64"
+LABEL bodhi.platform.compatibility="x86_64"
 LABEL bodhi.requires.gpu="vulkan-compatible"
 
 # BodhiApp: Create version file for runtime access
@@ -109,16 +103,9 @@ RUN echo "{\"version\":\"${BUILD_VERSION}\",\"commit\":\"${BUILD_COMMIT}\",\"tim
 # BodhiApp: Use non-root user
 USER llama
 
-# BodhiApp: Health check - verify Vulkan availability and binary
+# BodhiApp: Health check - verify Vulkan availability and binary (x86_64 only)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD ARCH=$(uname -m) && \
-        if [ "$ARCH" = "x86_64" ]; then \
-            test -x /app/bin/x86_64-unknown-linux-gnu/vulkan/llama-server; \
-        elif [ "$ARCH" = "aarch64" ]; then \
-            test -x /app/bin/aarch64-unknown-linux-gnu/vulkan/llama-server; \
-        else \
-            exit 1; \
-        fi && \
+    CMD test -x /app/bin/x86_64-unknown-linux-gnu/vulkan/llama-server && \
         vulkaninfo > /dev/null 2>&1 || exit 1
 
 # BodhiApp: Metadata labels

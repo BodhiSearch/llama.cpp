@@ -41,14 +41,13 @@ ENV LD_LIBRARY_PATH=${ASCEND_TOOLKIT_HOME}/runtime/lib64/stub:$LD_LIBRARY_PATH
 
 # -- Build llama.cpp --
 # Use the passed ASCEND_SOC_TYPE argument and add general build options
+# Note: GGML_CPU_ALL_VARIANTS causes build failures on CANN, matches upstream config
 RUN source /usr/local/Ascend/ascend-toolkit/set_env.sh --force \
     && \
     cmake -B build \
         -DGGML_CANN=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DSOC_TYPE=${ASCEND_SOC_TYPE} \
-        -DGGML_BACKEND_DL=ON \
-        -DGGML_CPU_ALL_VARIANTS=ON \
         -DLLAMA_BUILD_TESTS=OFF \
         -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,\$ORIGIN" \
         . && \

@@ -162,7 +162,8 @@ jobs:
           cache-from: type=gha,scope=rocm
           cache-to: type=gha,mode=max,scope=rocm
 
-  # Build Vulkan variant (supports multi-platform)
+  # Build Vulkan variant (x86_64 only)
+  # Note: ARM64 builds disabled to match upstream - Vulkan SDK has extraction issues on ARM64
   build-vulkan:
     needs: extract-version
     runs-on: ubuntu-latest-8-cores
@@ -188,7 +189,7 @@ jobs:
         with:
           context: .
           file: .devops/base-images/vulkan.Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.REGISTRY }}:vulkan-${{ needs.extract-version.outputs.version }}
@@ -281,6 +282,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=intel
 
   # Build CANN variant (Huawei Ascend NPU, supports multi-platform)
+  # Note: CANN Dockerfile exists in upstream .devops/ but is NOT in their workflow
+  # We build it for BodhiApp's Chinese market support
   build-cann:
     needs: extract-version
     runs-on: ubuntu-latest-8-cores
@@ -357,7 +360,7 @@ jobs:
             docker pull {0}:rocm-{1}
             ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
 
-            ${{ needs.build-vulkan.result == 'success' && '✅ **Vulkan Runtime** (Platform: linux/amd64, linux/arm64)' || '❌ **Vulkan Runtime** - Build failed' }}
+            ${{ needs.build-vulkan.result == 'success' && '✅ **Vulkan Runtime** (Platform: linux/amd64)' || '❌ **Vulkan Runtime** - Build failed' }}
             ${{ needs.build-vulkan.result == 'success' && format('```bash
             docker pull {0}:vulkan-{1}
             ```', env.REGISTRY, needs.extract-version.outputs.version) || '' }}
@@ -455,9 +458,9 @@ jobs:
 
           # Vulkan
           if [[ "${{ needs.build-vulkan.result }}" == "success" ]]; then
-            echo "| Vulkan | ✅ Success | linux/amd64,linux/arm64 | llama.cpp:vulkan-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Vulkan | ✅ Success | linux/amd64 | llama.cpp:vulkan-${{ needs.extract-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| Vulkan | ❌ Failed | linux/amd64,linux/arm64 | - |" >> $GITHUB_STEP_SUMMARY
+            echo "| Vulkan | ❌ Failed | linux/amd64 | - |" >> $GITHUB_STEP_SUMMARY
           fi
 
           # MUSA
