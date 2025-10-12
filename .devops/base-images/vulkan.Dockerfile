@@ -17,7 +17,7 @@ RUN ARCH=$(uname -m) && \
     wget -qO /tmp/vulkan-sdk.tar.xz https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkan-sdk-linux-${ARCH}-${VULKAN_SDK_VERSION}.tar.xz && \
     mkdir -p /opt/vulkan && \
     tar -xf /tmp/vulkan-sdk.tar.xz -C /tmp --strip-components=1 && \
-    mv /tmp/x86_64/* /opt/vulkan/ && \
+    mv /tmp/${ARCH}/* /opt/vulkan/ && \
     rm -rf /tmp/*
 
 # Install cURL and Vulkan SDK dependencies
@@ -36,7 +36,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN cmake -B build -DGGML_NATIVE=OFF -DGGML_VULKAN=1  -DLLAMA_BUILD_TESTS=OFF -DGGML_BACKEND_DL=ON -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,\$ORIGIN" && \
+RUN cmake -B build -DGGML_NATIVE=OFF -DGGML_VULKAN=1 -DLLAMA_BUILD_TESTS=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,\$ORIGIN" && \
     cmake --build build --config Release -j$(nproc)
 
 RUN mkdir -p /app/lib && \
@@ -111,7 +111,15 @@ USER llama
 
 # BodhiApp: Health check - verify Vulkan availability and binary
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD test -x /app/llama-server && vulkaninfo > /dev/null 2>&1 || exit 1
+    CMD ARCH=$(uname -m) && \
+        if [ "$ARCH" = "x86_64" ]; then \
+            test -x /app/bin/x86_64-unknown-linux-gnu/vulkan/llama-server; \
+        elif [ "$ARCH" = "aarch64" ]; then \
+            test -x /app/bin/aarch64-unknown-linux-gnu/vulkan/llama-server; \
+        else \
+            exit 1; \
+        fi && \
+        vulkaninfo > /dev/null 2>&1 || exit 1
 
 # BodhiApp: Metadata labels
 LABEL org.opencontainers.image.title="BodhiApp llama.cpp Vulkan Runtime"
