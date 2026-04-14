@@ -1,8 +1,8 @@
 ARG UBUNTU_VERSION=24.04
 
 # This needs to generally match the container host's environment.
-ARG ROCM_VERSION=7.2
-ARG AMDGPU_VERSION=7.2
+ARG ROCM_VERSION=7.2.1
+ARG AMDGPU_VERSION=7.2.1
 
 # Target the ROCm build image
 ARG BASE_ROCM_DEV_CONTAINER=rocm/dev-ubuntu-${UBUNTU_VERSION}:${ROCM_VERSION}-complete
@@ -12,7 +12,6 @@ FROM ${BASE_ROCM_DEV_CONTAINER} AS build
 
 # Unless otherwise specified, we make a fat build.
 # This is mostly tied to rocBLAS supported archs.
-# check https://rocm.docs.amd.com/projects/install-on-linux/en/docs-7.2.0/reference/system-requirements.html
 # check https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityrad/native_linux/native_linux_compatibility.html
 # check https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityryz/native_linux/native_linux_compatibility.html
 
@@ -62,7 +61,7 @@ RUN PLATFORM_TRIPLE="x86_64-unknown-linux-gnu" && \
 FROM ${BASE_ROCM_DEV_CONTAINER} AS base
 
 RUN apt-get update \
-    && apt-get install -y libgomp1 curl\
+    && apt-get install -y libgomp1 curl \
     && apt autoremove -y \
     && apt clean -y \
     && rm -rf /tmp/* /var/tmp/* \

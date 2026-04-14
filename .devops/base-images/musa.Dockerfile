@@ -50,7 +50,7 @@ RUN PLATFORM_TRIPLE="x86_64-unknown-linux-gnu" && \
 FROM ${BASE_MUSA_RUN_CONTAINER} AS base
 
 RUN apt-get update \
-    && apt-get install -y libgomp1 curl\
+    && apt-get install -y libgomp1 curl \
     && apt autoremove -y \
     && apt clean -y \
     && rm -rf /tmp/* /var/tmp/* \

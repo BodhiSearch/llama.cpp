@@ -1,6 +1,6 @@
-ARG UBUNTU_VERSION=22.04
+ARG UBUNTU_VERSION=24.04
 # This needs to generally match the container host's environment.
-ARG CUDA_VERSION=12.4.0
+ARG CUDA_VERSION=12.8.1
 # Target the CUDA build image
 ARG BASE_CUDA_DEV_CONTAINER=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 
@@ -18,7 +18,9 @@ ARG BUILD_TIMESTAMP
 ARG BUILD_BRANCH
 
 RUN apt-get update && \
-    apt-get install -y build-essential cmake python3 python3-pip git libssl-dev libgomp1
+    apt-get install -y gcc-14 g++-14 build-essential cmake python3 python3-pip git libssl-dev libgomp1
+
+ENV CC=gcc-14 CXX=g++-14 CUDAHOSTCXX=g++-14
 
 WORKDIR /app
 
@@ -46,7 +48,9 @@ ARG BUILD_COMMIT
 ARG BUILD_TIMESTAMP
 ARG BUILD_BRANCH
 
-RUN apt-get update && apt-get install -y build-essential git cmake libssl-dev
+RUN apt-get update && apt-get install -y gcc-14 g++-14 build-essential git cmake libssl-dev
+
+ENV CC=gcc-14 CXX=g++-14
 
 WORKDIR /app
 COPY . .
@@ -64,7 +68,7 @@ RUN PLATFORM_TRIPLE="x86_64-unknown-linux-gnu" && \
 FROM ${BASE_CUDA_RUN_CONTAINER} AS base
 
 RUN apt-get update \
-    && apt-get install -y libgomp1 curl\
+    && apt-get install -y libgomp1 curl \
     && apt autoremove -y \
     && apt clean -y \
     && rm -rf /tmp/* /var/tmp/* \
